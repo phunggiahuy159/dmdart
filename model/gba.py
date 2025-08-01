@@ -6,7 +6,7 @@ import math
 import logging
 from tqdm import tqdm
 
-class ModifiedUWE(nn.Module):
+class GBA(nn.Module):
     def __init__(self, ETC, num_times, temperature, weight_UWE, use_percentage=True, percentage=0.7, num_high_weight_tokens=20, min_tf_threshold=0.0):
         super().__init__()
 

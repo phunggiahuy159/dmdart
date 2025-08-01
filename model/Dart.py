@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from .gba import ModifiedUWE, ETC
+from .gba import GBA, ETC
 from .Encoder import MLPEncoder
 
 class CFDTM(nn.Module):
@@ -111,7 +111,7 @@ class CFDTM(nn.Module):
         )
 
         etc = ETC(num_times, temperature, weight_neg, weight_pos)
-        self.beta_loss = ModifiedUWE(etc, num_times, temperature, self.weight_beta_align)
+        self.beta_loss = GBA(etc, num_times, temperature, self.weight_beta_align)
 
         self.decomposition = self.series_decomp(23)
 
