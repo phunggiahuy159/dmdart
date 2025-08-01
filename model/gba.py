@@ -23,25 +23,20 @@ class GBA(nn.Module):
         """Contrastive loss calculation using document-level TF-IDF scores"""
         device = doc_tfidf.device
 
-        # Ensure global_beta is a tensor on the correct device
         if not isinstance(global_beta, torch.Tensor):
             global_beta = torch.tensor(global_beta, device=device)
         elif global_beta.device != device:
             global_beta = global_beta.to(device)
 
-        # Preallocate tensors for loss accumulation
         total_loss = torch.tensor(0.0, device=device)
         valid_times = torch.tensor(0, device=device)
 
-        # Process each time slice
         for t in range(self.num_times):
             time_tfidf = doc_tfidf[t]
 
-            # Skip if empty time slice
             if torch.sum(time_tfidf) == 0:
                 continue
 
-            # Get valid tokens (those with TF-IDF > threshold)
             if self.min_tf_threshold > 0:
                 valid_tokens = torch.nonzero(time_tfidf > self.min_tf_threshold, as_tuple=True)[0]
                 if len(valid_tokens) == 0:
@@ -49,21 +44,16 @@ class GBA(nn.Module):
             else:
                 valid_tokens = torch.nonzero(time_tfidf > 0, as_tuple=True)[0]
 
-            # Skip if no valid tokens
             if len(valid_tokens) == 0:
                 continue
 
-            # Get high-weight tokens
             if self.use_percentage:
-                # Calculate number of tokens to keep (top X%)
                 num_to_keep = max(1, int(len(valid_tokens) * self.percentage))
 
-                # Get top tokens using efficient GPU operations
                 token_scores = time_tfidf[valid_tokens]
                 _, top_indices = torch.topk(token_scores, num_to_keep)
                 high_weight_tokens = valid_tokens[top_indices]
             else:
-                # Original approach: fixed number of top tokens
                 if len(valid_tokens) > self.num_high_weight_tokens:
                     token_scores = time_tfidf[valid_tokens]
                     _, top_indices = torch.topk(token_scores, self.num_high_weight_tokens)
@@ -71,7 +61,6 @@ class GBA(nn.Module):
                 else:
                     high_weight_tokens = valid_tokens
 
-            # Create mask for high-weight tokens
             mask = torch.zeros(time_tfidf.shape[0], device=device, dtype=torch.float32)
             mask.index_fill_(0, high_weight_tokens, 1.0)
 
@@ -84,17 +73,14 @@ class GBA(nn.Module):
 
             local_beta_t = local_beta[t]
 
-            # Debug shape checks
             if global_beta_t.shape != local_beta_t.shape:
                 raise ValueError(f"Shape mismatch: global_beta_t {global_beta_t.shape}, local_beta_t {local_beta_t.shape} at time {t}")
             if global_beta_t.shape[1] != mask.shape[0]:
                 raise ValueError(f"Shape mismatch: beta vocab {global_beta_t.shape[1]}, mask {mask.shape[0]}")
 
-            # Apply mask to beta distributions
             global_filtered = global_beta_t * mask
             local_filtered = local_beta_t * mask
 
-            # Normalize filtered distributions
             global_sum = torch.sum(global_filtered, dim=1, keepdim=True)
             local_sum = torch.sum(local_filtered, dim=1, keepdim=True)
 
@@ -104,11 +90,9 @@ class GBA(nn.Module):
             global_filtered = global_filtered / global_sum
             local_filtered = local_filtered / local_sum
 
-            # Skip if invalid distributions
             if torch.isnan(global_filtered).any() or torch.isnan(local_filtered).any():
                 continue
 
-            # Compute contrastive loss
             contrastive_loss = self.ETC.compute_loss(
                 global_filtered,
                 local_beta_t,
@@ -117,11 +101,9 @@ class GBA(nn.Module):
                 only_pos=True
             )
 
-            # Accumulate loss
             total_loss += contrastive_loss
             valid_times += 1
 
-        # Scale the loss
         if valid_times > 0:
             total_loss = total_loss * (self.weight_UWE / valid_times.float())
 
