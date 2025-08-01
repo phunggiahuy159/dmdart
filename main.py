@@ -10,6 +10,8 @@ from eva.topic_diversity import dynamic_diversity
 from eva.clustering import _clustering, purity_score
 from eva.classification import f1_score, accuracy_score, _cls
 from eva.evaluate_dynamic_topic_model import evaluate_dynamic_topic_model
+from eva.custom_coherence import apply_custom_coherence_patch
+apply_custom_coherence_patch()
 
 
 download_dataset('NYT', cache_path='./datasets')
