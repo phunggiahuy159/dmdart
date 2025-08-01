@@ -1,14 +1,14 @@
 import numpy as np
 import torch
 import itertools
-from .data.dynamic_dataset import DynamicDataset
-from .data.download import download_dataset
-from .trainer.trainer import DynamicTrainer
-from .model.Dart import CFDTM
-from .eva.topic_coherence import dynamic_coherence
-from .eva.topic_diversity import dynamic_diversity
-from .eva.clustering import _clustering, purity_score
-from .eva.classification import f1_score, accuracy_score, _cls
+from data.dynamic_dataset import DynamicDataset
+from data.download import download_dataset
+from trainer.trainer import DynamicTrainer
+from model.Dart import CFDTM
+from eva.topic_coherence import dynamic_coherence
+from eva.topic_diversity import dynamic_diversity
+from eva.clustering import _clustering, purity_score
+from eva.classification import f1_score, accuracy_score, _cls
 from eva.evaluate_dynamic_topic_model import evaluate_dynamic_topic_model
 
 
