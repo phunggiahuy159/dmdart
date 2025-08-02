@@ -23,6 +23,7 @@ class DART(nn.Module):
                  dropout=0.,
                  embed_size=200,
                  delta=0.1,
+                 beta_warm_up = 150
                 ):
         super().__init__()
 
@@ -34,24 +35,16 @@ class DART(nn.Module):
         self.delta = delta
         self.vocab_size = vocab_size
         self.embed_size = embed_size
-
-        # New flags for two-phase training
-        self.current_epoch = 0
         self.global_beta = None
         self.beta_history = []
-        self._last_beta_epoch = None
-
+        self.beta_warm_up = beta_warm_up
         self.weight_beta_align = weight_beta_align
-        self.weight_alpha = weight_alpha
-
-        # Theta priors
         self.a = 1 * np.ones((1, num_topics)).astype(np.float32)
         self.mu2 = nn.Parameter(torch.as_tensor((np.log(self.a).T - np.mean(np.log(self.a), 1)).T))
         self.var2 = nn.Parameter(torch.as_tensor((((1.0 / self.a) * (1 - (2.0 / num_topics))).T + (1.0 / (num_topics * num_topics)) * np.sum(1.0 / self.a, 1)).T))
         self.mu2.requires_grad = False
         self.var2.requires_grad = False
 
-        # Core components
         self.encoder = MLPEncoder(vocab_size, num_topics, en_units, dropout)
         self.decoder_bn = nn.BatchNorm1d(vocab_size, affine=False)
 
@@ -62,13 +55,10 @@ class DART(nn.Module):
         else:
             self.word_embeddings = nn.Parameter(torch.from_numpy(pretrained_WE).float())
 
-        # Topic embeddings: TxKxD
+        # Topic embeddings:Base embedding
         self.topic_embeddings = nn.Parameter(
             nn.init.xavier_normal_(torch.zeros(num_topics, self.word_embeddings.shape[1])).repeat(num_times, 1, 1)
         )
-
-        # Learnable adaptive dropout weight for temporal integration
-        self.temporal_dropout_weight = nn.Parameter(torch.ones(1) * 0.5)
 
         # Alpha networks
         self.alpha_fc_mean = nn.Sequential(
@@ -80,13 +70,13 @@ class DART(nn.Module):
             nn.Linear(self.embed_size, self.embed_size // 2),
             nn.ReLU(),
             nn.Linear(self.embed_size // 2, 1),
-            nn.Sigmoid()  # Output between 0 and 1 for dropout rate
+            nn.Sigmoid() 
         )
         self.adaptive_dropout_net_mean = nn.Sequential(
             nn.Linear(self.embed_size, self.embed_size // 2),
             nn.ReLU(),
             nn.Linear(self.embed_size // 2, 1),
-            nn.Sigmoid()  # Output between 0 and 1 for dropout rate
+            nn.Sigmoid()
         )
         for m in self.adaptive_dropout_net_mean:
           if isinstance(m, nn.Linear):
@@ -116,7 +106,7 @@ class DART(nn.Module):
         self.decomposition = self.series_decomp(23)
 
     def compute_global_beta(self):
-        """Compute global beta by averaging stored beta history (on CPU)"""
+        """Compute global beta by averaging stored beta history"""
         if not self.beta_history:
             return None
         stacked_betas = torch.stack(self.beta_history, dim=0)
@@ -151,7 +141,6 @@ class DART(nn.Module):
             kl = -0.5 * torch.sum(1 + q_logsigma - q_mu.pow(2) - q_logsigma.exp(), dim=-1)
         return kl
 
-    # In class DART
     def adaptive_dropout(self, x):
         """
         Apply learnable adaptive dropout to input tensor x
@@ -166,43 +155,27 @@ class DART(nn.Module):
         # Compute adaptive dropout rate for each topic (as variance)
         dropout_rates = self.adaptive_dropout_net(x)  # (num_topics, 1)
         mean = self.adaptive_dropout_net_mean(x)
-    
-        # --- START: MODIFICATION FOR STABILITY ---
-    
-        # Clamp dropout_rates to prevent them from getting too close to 1.0
-        # This is a good practice but the main fix is below.
         dropout_rates = torch.clamp(dropout_rates, 0.0, 0.99)
     
         # Expand dropout_rates to match x shape
         dropout_rates_expanded = dropout_rates.expand_as(x)
     
-        # The key issue is the denominator (1 - p) approaching zero.
-        # We will clamp the denominator to a safe minimum value (e.g., 1e-6).
-        denominator = torch.clamp(1.0 - dropout_rates_expanded, min=1e-6)
-        
-        # Now the std calculation is stable.
+        denominator = torch.clamp(1.0 - dropout_rates_expanded, min=1e-6)        
         std = torch.sqrt(dropout_rates_expanded / denominator)
-        
-        # --- END: MODIFICATION FOR STABILITY ---
-    
         noise = torch.normal(mean=mean, std=std)
     
-        # Apply Gaussian dropout
         dropped_x = x * noise
     
         return dropped_x
 
 
-
     def get_alpha(self):
         device = self.topic_embeddings.device
-        # Precompute time scaling values once
         time_scaling = torch.linspace(0, 1, steps=self.num_times, device=device)  # shape (num_times,)
 
         kl_alpha = []
         alphas = torch.zeros((self.num_times, self.num_topics, self.embed_size), device=device)
 
-        # Initialize time 0 with the given topic embeddings (create a copy to avoid in-place issues)
         alpha_0 = self.topic_embeddings[0].clone()
         alphas[0] = alpha_0
 
@@ -215,13 +188,10 @@ class DART(nn.Module):
         kl_alpha.append(kl_0)
 
         for t in range(1, self.num_times):
-            # Gather past alpha values and vectorize over topics.
-            # alphas[:t] has shape (t, num_topics, embed_size); permute to (num_topics, t, embed_size)
-            alpha_series = alphas[:t].permute(1, 0, 2).detach()  # shape: (num_topics, t, embed_size)
+            alpha_series = alphas[:t].permute(1, 0, 2).detach()
 
             # Apply vectorized series decomposition over all topics.
             seas, trend = self.decomposition(alpha_series)  # seas, trend: (num_topics, t, embed_size)
-
             # Reshape to apply the corresponding Linear layer in parallel.
             seas_perm = seas.permute(0, 2, 1)  # shape: (num_topics, embed_size, t)
             n_topics, emb_dim, seq_len = seas_perm.shape  # seq_len equals current t
@@ -248,12 +218,10 @@ class DART(nn.Module):
             base_embedding = self.topic_embeddings[t]
             current_alpha = base_embedding + dropped_combined_alpha
 
-            # Use detach() and clone() to break potential gradient computation cycles
             alphas[t] = current_alpha
-
-            p_mu_t = alphas[t-1].detach()  # Detach to avoid gradient issues
+            p_mu_t = alphas[t-1].detach()
             p_logsigma_t = torch.log(self.delta * torch.ones(self.num_topics, self.embed_size, device=device))
-            q_mu_t = self.alpha_fc_mean(current_alpha)  # Use current_alpha for KL computation
+            q_mu_t = self.alpha_fc_mean(current_alpha)
             q_logsigma_t = self.alpha_fc_logvar(current_alpha)
 
             kl_t = self.get_kl(q_mu_t, q_logsigma_t, p_mu_t, p_logsigma_t)
@@ -262,12 +230,7 @@ class DART(nn.Module):
         kl_alpha = torch.stack(kl_alpha).sum()
         return alphas, kl_alpha
     def get_beta(self):
-        """
-        Modified to use alphas instead of self.topic_embeddings
-        """
-        # Get alphas first
         alphas, _ = self.get_alpha()
-
         dist = self.pairwise_euclidean_dist(
             F.normalize(alphas, dim=-1),
             F.normalize(self.word_embeddings, dim=-1)
@@ -305,46 +268,37 @@ class DART(nn.Module):
         return cost
 
     def forward(self, x, times, doc_embedding=None, epoch=None):
-          theta, mu, logvar = self.get_theta(x, times)
-          kl_theta = self.get_KL(mu, logvar)
+        theta, mu, logvar = self.get_theta(x, times)
+        kl_theta = self.get_KL(mu, logvar)
+        alphas, kl_alpha = self.get_alpha()
+        beta = self.get_beta()
+        global_beta = torch.mean(beta, dim=0)
+        time_index_beta = beta[times]
+        recon_x = self.decode(theta, time_index_beta)
+        NLL = self.get_NLL(theta, time_index_beta, x, recon_x).mean()
+        loss_ETC = self.ETC(alphas)
+        # Only apply beta alignment loss in phase 2
+        beta_loss = 0.0
+        if epoch is not None and epoch > self.beta_warm_up:
+            beta_loss = self.beta_loss(self.doc_tfidf, global_beta, beta)
+            loss = NLL + kl_theta + loss_ETC + kl_alpha + beta_loss
 
-          # Get alphas (will use temporal if available)
-          alphas, kl_alpha = self.get_alpha()
+            rst_dict = {
+                'loss': loss,
+                'nll': NLL,
+                'kl_theta': kl_theta,
+                'kl_alpha': kl_alpha,
+                'loss_ETC': loss_ETC,
+                'beta_alignment': beta_loss,
+            }
+        else:
+            loss = NLL + kl_theta + loss_ETC + kl_alpha
 
-          # Use alphas to compute beta
-          beta = self.get_beta()
-          global_beta = torch.mean(beta, dim=0)
-
-          time_index_beta = beta[times]
-          recon_x = self.decode(theta, time_index_beta)
-          NLL = self.get_NLL(theta, time_index_beta, x, recon_x).mean()
-          # NLL = NLL * 15
-          # Use alphas for ETC loss instead of self.topic_embeddings
-          loss_ETC = self.ETC(alphas)
-
-          # Only apply beta alignment loss in phase 2
-          beta_loss = 0.0
-          if epoch is not None and epoch > 150:
-              beta_loss = self.beta_loss(self.doc_tfidf, global_beta, beta)
-              loss = NLL + kl_theta + loss_ETC + self.weight_alpha * kl_alpha + beta_loss
-
-              rst_dict = {
-                  'loss': loss,
-                  'nll': NLL,
-                  'kl_theta': kl_theta,
-                  'kl_alpha': kl_alpha,
-                  'loss_ETC': loss_ETC,
-                  'beta_alignment': beta_loss,
-              }
-          else:
-              loss = NLL + kl_theta + loss_ETC + self.weight_alpha * kl_alpha
-
-              rst_dict = {
-                  'loss': loss,
-                  'nll': NLL,
-                  'kl_theta': kl_theta,
-                  'kl_alpha': kl_alpha,
-                  'loss_ETC': loss_ETC,
-              }
-
-          return rst_dict
+            rst_dict = {
+                'loss': loss,
+                'nll': NLL,
+                'kl_theta': kl_theta,
+                'kl_alpha': kl_alpha,
+                'loss_ETC': loss_ETC,
+            }
+        return rst_dict
