@@ -81,7 +81,7 @@ def temporal_topic_coherence_optimized(topic_words_over_time: List[str],
         for w1 in words_t:
             w1_docs_count = word_doc_freq.get(w1, 0)
             for w2 in words_t_plus:
-                # if w1 == w2: # From your original 'optimized' version
+                # if w1 == w2: 
                 #     continue
 
                 w2_docs_count = word_doc_freq.get(w2, 0)

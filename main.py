@@ -4,7 +4,7 @@ import itertools
 from data.dynamic_dataset import DynamicDataset
 from data.download import download_dataset
 from trainer.trainer import DynamicTrainer
-from model.Dart import CFDTM
+from model.Dart import DART
 from eva.topic_coherence import dynamic_coherence
 from eva.topic_diversity import dynamic_diversity
 from eva.clustering import _clustering, purity_score
@@ -37,7 +37,7 @@ for weight_neg, weight_beta_align, weight_alpha in param_combinations:
 
     print(f"\nTraining with parameters: weight_neg={weight_neg}, weight_beta_align={weight_beta_align}, weight_alpha={weight_alpha}")
 
-    model = CFDTM(
+    model = DART(
         vocab_size=dataset.vocab_size,
         num_times=dataset.num_times,
         pretrained_WE=dataset.pretrained_WE,

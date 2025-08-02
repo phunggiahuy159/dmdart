@@ -5,7 +5,7 @@ import numpy as np
 from .gba import GBA, ETC
 from .Encoder import MLPEncoder
 
-class CFDTM(nn.Module):
+class DART(nn.Module):
     def __init__(self,
                  vocab_size,
                  train_time_wordfreq,
@@ -151,7 +151,7 @@ class CFDTM(nn.Module):
             kl = -0.5 * torch.sum(1 + q_logsigma - q_mu.pow(2) - q_logsigma.exp(), dim=-1)
         return kl
 
-    # In class CFDTM
+    # In class DART
     def adaptive_dropout(self, x):
         """
         Apply learnable adaptive dropout to input tensor x
