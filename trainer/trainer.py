@@ -40,18 +40,17 @@ logger = Logger("WARNING")
 
 class DynamicTrainer:
     def __init__(self,
-                 model,
-                 dataset,
-                 num_top_words=15,
-                 epochs=200,
-                 learning_rate=0.002,
-                 batch_size=200,
-                 lr_scheduler=None,
-                 lr_step_size=125,
-                 log_interval=5,
-                 phase1_etc_weight_multiplier=5.0,  # Multiplier for ETC weight in phase 1
-                 verbose=False
-                ):
+                model,
+                dataset,
+                num_top_words=15,
+                epochs=200,
+                learning_rate=0.002,
+                batch_size=200,
+                lr_scheduler=None,
+                lr_step_size=125,
+                log_interval=5,
+                verbose=False
+            ):
 
         self.model = model
         self.dataset = dataset
@@ -62,8 +61,6 @@ class DynamicTrainer:
         self.lr_scheduler = lr_scheduler
         self.lr_step_size = lr_step_size
         self.log_interval = log_interval
-        self.phase1_etc_weight_multiplier = phase1_etc_weight_multiplier
-
         self.verbose = verbose
         if verbose:
             logger.set_level("DEBUG")
