@@ -190,7 +190,6 @@ class DART(nn.Module):
         for t in range(1, self.num_times):
             alpha_series = alphas[:t].permute(1, 0, 2).detach()
 
-            # Apply vectorized series decomposition over all topics.
             seas, trend = self.decomposition(alpha_series)  # seas, trend: (num_topics, t, embed_size)
             # Reshape to apply the corresponding Linear layer in parallel.
             seas_perm = seas.permute(0, 2, 1)  # shape: (num_topics, embed_size, t)
@@ -204,17 +203,10 @@ class DART(nn.Module):
             l_trend = self.Linear_Trend[t-1](trend_flat)  # shape: (num_topics*emb_dim, 1)
             l_trend = l_trend.reshape(n_topics, emb_dim)  # (num_topics, emb_dim)
 
-            # Compute mixing weight using precomputed time scaling value.
-            # mix_weight = self.alpha_mixing_net_seasonal(time_scaling[t].view(1, 1))  # shape: (1, num_seasonal_experts)
-            # mix_weight = mix_weight.squeeze()  # becomes a scalar if num_seasonal_experts==1
-
-            combined_alpha = (l_trend + l_seas)   # shape: (num_topics, embed_size)
-
-            # Apply adaptive dropout to combined_alpha
+            combined_alpha = l_trend + l_seas
             dropped_combined_alpha = self.adaptive_dropout(combined_alpha)
 
             # Use base topic embeddings and add the dropped combined_alpha
-            # Clone to avoid in-place operations
             base_embedding = self.topic_embeddings[t]
             current_alpha = base_embedding + dropped_combined_alpha
 

@@ -44,7 +44,6 @@ class DynamicTrainer:
                  dataset,
                  num_top_words=15,
                  epochs=200,
-                 initial_epochs=100,  # Number of epochs for phase 1
                  learning_rate=0.002,
                  batch_size=200,
                  lr_scheduler=None,
@@ -58,7 +57,6 @@ class DynamicTrainer:
         self.dataset = dataset
         self.num_top_words = num_top_words
         self.epochs = epochs
-        self.initial_epochs = initial_epochs
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.lr_scheduler = lr_scheduler
@@ -93,31 +91,20 @@ class DynamicTrainer:
 
         data_size = len(self.dataset.train_dataloader.dataset)
 
-        # Early stopping configuration (only used in Phase 2)
-        patience = 30               # Number of epochs to wait for improvement
-        phase2_epoch_counter = 0    # Count epochs in Phase 2
-
-        logger.info("Generating contextual embeddings for documents...")
-
         for epoch in tqdm(range(1, self.epochs + 1)):
-            # Check for phase transition
             self.model.train()
             loss_rst_dict = defaultdict(float)
 
             for batch_idx, batch_data in enumerate(self.dataset.train_dataloader):
-
                 rst_dict = self.model(
                     batch_data['bow'],
                     batch_data['times'],
                     epoch=epoch
                 )
-
                 batch_loss = rst_dict['loss']
-
                 optimizer.zero_grad()
                 batch_loss.backward()
                 optimizer.step()
-
                 for key in rst_dict:
                     if isinstance(rst_dict[key], torch.Tensor):
                         loss_rst_dict[key] += rst_dict[key].item() * len(batch_data['bow'])
@@ -126,10 +113,6 @@ class DynamicTrainer:
 
             if self.lr_scheduler:
                 lr_scheduler.step()
-
-            # Calculate average loss for this epoch
-            avg_loss = loss_rst_dict['loss'] / data_size
-
             if epoch % self.log_interval == 0:
                 output_log = f'Epoch: {epoch:03d}'
                 for key in loss_rst_dict:
